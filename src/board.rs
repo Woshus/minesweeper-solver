@@ -1,3 +1,7 @@
+//! # Minesweeper Board Engine
+//!
+//! This module provides the core logic for generating and managing a Minesweeper board.
+
 use rand::rng;
 use rand::seq::SliceRandom;
 use std::fmt;
@@ -17,23 +21,30 @@ pub enum CellState {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Cell {
-    pub content: CellContent,
-    pub state: CellState,
+    content: CellContent,
+    state: CellState,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Board {
-    pub width: usize,
-    pub height: usize,
-    pub cells: Vec<Cell>,
+    width: usize,
+    height: usize,
+    cells: Vec<Cell>,
 }
 
 impl Board {
-    // pub fn new(width: usize, height: usize, mine_count: usize) -> Self {
-    //     Self {}
-    // }
-
-    pub fn new_empty(width: usize, height: usize) -> Self {
+    /// Creates a new Minesweeper board with the speicified dimensions.
+    ///
+    /// All cells are initialized as `Hidden`
+    ///
+    ///  # Panics
+    ///
+    /// Panics if `width` or `height` is 0.
+    pub fn new(width: usize, height: usize) -> Self {
+        assert!(
+            width > 0 && height > 0,
+            "Dimensions must be greater than zero"
+        );
         let total_cells = width * height;
 
         Self {
@@ -90,7 +101,19 @@ impl Board {
         neighbors
     }
 
+    /// Randomly distrubutes a set number of mines across the board.
+    ///
+    /// This function also increments the value stored in all cells
+    /// adjacent to the newly placed mines.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `total_mines` is greater than the total number of cells.
     pub fn generate_mines(&mut self, start_x: usize, start_y: usize, total_mines: usize) {
+        assert!(
+            total_mines <= self.cells.len(),
+            "Cannot place more mines than cells available"
+        );
         let mut rng = rng();
         let start_idx = self.get_index(start_x, start_y);
 
@@ -144,7 +167,7 @@ mod test {
 
     #[fixture]
     fn small_board() -> Board {
-        Board::new_empty(5, 5)
+        Board::new(5, 5)
     }
 
     #[rstest]
@@ -201,7 +224,7 @@ mod test {
 
     #[test]
     fn test_mine_placement() {
-        let mut board = Board::new_empty(5, 5);
+        let mut board = Board::new(5, 5);
         board.place_mine(12);
 
         let (x, y) = board.get_coords(12);
@@ -222,7 +245,7 @@ mod test {
 
     #[test]
     fn test_double_placement_idempotency() {
-        let mut board = Board::new_empty(5, 5);
+        let mut board = Board::new(5, 5);
         board.place_mine(12);
         board.place_mine(12);
 
