@@ -154,6 +154,20 @@ impl Board {
         }
     }
 
+    /// Places a flag on a specified `Hidden` cell.
+    pub fn place_flag(&mut self, idx: usize) {
+        if self.cells[idx].state == CellState::Hidden {
+            self.cells[idx].state = CellState::Flagged;
+        }
+    }
+
+    /// Removes a flag on a specified `Flagged` cell.
+    pub fn remove_flag(&mut self, idx: usize) {
+        if self.cells[idx].state == CellState::Flagged {
+            self.cells[idx].state = CellState::Hidden;
+        }
+    }
+
     /// This function handles the logic of what happens when a cell is clicked/revealed.
     ///
     /// The return value is an `RevealResult` enum, which is used by the TBD game engine
@@ -164,6 +178,7 @@ impl Board {
             return RevealResult::AlreadyFlagged;
         }
 
+        // TODO: Add Chording, Add Flagging
         if self.cells[idx].state == CellState::Revealed {
             return RevealResult::AlreadyRevealed;
         }
@@ -367,5 +382,18 @@ mod test {
             CellState::Revealed
         );
         assert_eq!(board_with_diagonal_mines.cells[14].state, CellState::Hidden);
+    }
+
+    #[rstest]
+    fn test_flagging_and_unflagging(mut board_with_diagonal_mines: Board) {
+        board_with_diagonal_mines.click_cell(0);
+        assert_eq!(board_with_diagonal_mines.cells[12].state, CellState::Hidden);
+        board_with_diagonal_mines.place_flag(12);
+        assert_eq!(
+            board_with_diagonal_mines.cells[12].state,
+            CellState::Flagged
+        );
+        board_with_diagonal_mines.remove_flag(12);
+        assert_eq!(board_with_diagonal_mines.cells[12].state, CellState::Hidden);
     }
 }
