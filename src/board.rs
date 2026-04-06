@@ -32,13 +32,17 @@ pub struct Board {
     cells: Vec<Cell>,
 }
 
+// TODO: Below NoOp's can be modified into actual functionality
+// - chord_cell() NoOp when not enough cells are flagged can highlight the cells
+// around it instead of NoOp.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RevealResult {
     HitMine,
     Opened,
-    AlreadyRevealed,
-    AlreadyFlagged,
+    Chorded,
+    NoOp,
 }
+
 impl Board {
     /// Creates a new Minesweeper board with the speicified dimensions.
     ///
@@ -175,12 +179,7 @@ impl Board {
     pub fn click_cell(&mut self, idx: usize) -> RevealResult {
         assert!(idx < self.cells.len());
         if self.cells[idx].state == CellState::Flagged {
-            return RevealResult::AlreadyFlagged;
-        }
-
-        // TODO: Add Chording, Add Flagging
-        if self.cells[idx].state == CellState::Revealed {
-            return RevealResult::AlreadyRevealed;
+            return RevealResult::NoOp;
         }
 
         // Logic for hitting a bomb will be handled in game engine
@@ -188,8 +187,52 @@ impl Board {
             return RevealResult::HitMine;
         }
 
+        if self.cells[idx].state == CellState::Revealed
+            && let CellContent::Number(num) = self.cells[idx].content
+        {
+            if num == 0 {
+                return RevealResult::NoOp;
+            } else {
+                return self.chord_cell(idx);
+            }
+        }
+
         self.cascade_open(idx);
         RevealResult::Opened
+    }
+
+    fn chord_cell(&mut self, idx: usize) -> RevealResult {
+        let CellContent::Number(num) = self.cells[idx].content else {
+            return RevealResult::NoOp;
+        };
+        // TODO: Standardize impl functions to all accept idx instead of x,y
+        let (x, y) = self.get_coords(idx);
+        let neighbors = self.get_neighbors_indices(x, y);
+
+        let neighbor_flag_count = neighbors
+            .iter()
+            .filter(|&&idx| self.cells[idx].state == CellState::Flagged)
+            .count() as u8;
+
+        // TODO: Instead of NoOp, potentially highlight cells instead, while
+        // MouseButton down or similar.
+        if neighbor_flag_count != num {
+            return RevealResult::NoOp;
+        }
+
+        if neighbors.iter().any(|&idx| {
+            self.cells[idx].content == CellContent::Mine
+                && self.cells[idx].state != CellState::Flagged
+        }) {
+            return RevealResult::HitMine;
+        }
+
+        for neighbor_idx in neighbors {
+            if self.cells[neighbor_idx].state == CellState::Hidden {
+                self.cascade_open(neighbor_idx);
+            }
+        }
+        RevealResult::Chorded
     }
 
     // Performs an iterative DFS to reveal connected empty cells and their neighbors.
@@ -356,14 +399,8 @@ mod test {
             board_with_diagonal_mines.click_cell(0),
             RevealResult::Opened
         );
-        assert_eq!(
-            board_with_diagonal_mines.click_cell(0),
-            RevealResult::AlreadyRevealed
-        );
-        assert_eq!(
-            board_with_diagonal_mines.click_cell(2),
-            RevealResult::AlreadyRevealed
-        );
+        assert_eq!(board_with_diagonal_mines.click_cell(0), RevealResult::NoOp);
+        assert_eq!(board_with_diagonal_mines.click_cell(2), RevealResult::NoOp);
         assert_eq!(
             board_with_diagonal_mines.cells[0].state,
             CellState::Revealed
@@ -395,5 +432,52 @@ mod test {
         );
         board_with_diagonal_mines.remove_flag(12);
         assert_eq!(board_with_diagonal_mines.cells[12].state, CellState::Hidden);
+    }
+
+    #[rstest]
+    fn test_chord_cell_fails(mut board_with_diagonal_mines: Board) {
+        // No Flags
+        assert_eq!(board_with_diagonal_mines.chord_cell(7), RevealResult::NoOp);
+        board_with_diagonal_mines.click_cell(7);
+        assert_eq!(board_with_diagonal_mines.chord_cell(7), RevealResult::NoOp);
+
+        // Too Little / Too Many Flags
+        board_with_diagonal_mines.place_flag(8);
+        assert_eq!(board_with_diagonal_mines.chord_cell(7), RevealResult::NoOp);
+
+        board_with_diagonal_mines.place_flag(2);
+        board_with_diagonal_mines.place_flag(3);
+        assert_eq!(board_with_diagonal_mines.chord_cell(7), RevealResult::NoOp);
+
+        // Wrong Flags
+        board_with_diagonal_mines.remove_flag(3);
+        assert_eq!(
+            board_with_diagonal_mines.chord_cell(7),
+            RevealResult::HitMine
+        );
+    }
+
+    #[rstest]
+    fn test_chord_cell_success(mut board_with_diagonal_mines: Board) {
+        board_with_diagonal_mines.click_cell(7);
+        board_with_diagonal_mines.place_flag(8);
+        board_with_diagonal_mines.place_flag(12);
+        assert_eq!(
+            board_with_diagonal_mines.chord_cell(7),
+            RevealResult::Chorded
+        );
+        assert_eq!(
+            board_with_diagonal_mines.cells[0].state,
+            CellState::Revealed
+        );
+        assert_eq!(
+            board_with_diagonal_mines.cells[3].state,
+            CellState::Revealed
+        );
+        assert_eq!(
+            board_with_diagonal_mines.cells[13].state,
+            CellState::Revealed
+        );
+        assert_eq!(board_with_diagonal_mines.cells[24].state, CellState::Hidden);
     }
 }
