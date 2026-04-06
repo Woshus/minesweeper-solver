@@ -32,6 +32,13 @@ pub struct Board {
     cells: Vec<Cell>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RevealResult {
+    HitMine,
+    Opened,
+    AlreadyRevealed,
+    AlreadyFlagged,
+}
 impl Board {
     /// Creates a new Minesweeper board with the speicified dimensions.
     ///
@@ -101,7 +108,7 @@ impl Board {
         neighbors
     }
 
-    /// Randomly distrubutes a set number of mines across the board.
+    /// Randomly distributes a set number of mines across the board.
     ///
     /// This function also increments the value stored in all cells
     /// adjacent to the newly placed mines.
@@ -109,6 +116,9 @@ impl Board {
     /// # Panics
     ///
     /// Panics if `total_mines` is greater than the total number of cells.
+    ///
+    // TODO: Currently the start of a game can generate boards that start with CellContent::Number(1).
+    // Consider adding guaranteed opening logic.
     pub fn generate_mines(&mut self, start_x: usize, start_y: usize, total_mines: usize) {
         assert!(
             total_mines <= self.cells.len(),
@@ -143,6 +153,52 @@ impl Board {
             }
         }
     }
+
+    /// This function handles the logic of what happens when a cell is clicked/revealed.
+    ///
+    /// The return value is an `RevealResult` enum, which is used by the TBD game engine
+    /// to handle game events.
+    pub fn click_cell(&mut self, idx: usize) -> RevealResult {
+        assert!(idx < self.cells.len());
+        if self.cells[idx].state == CellState::Flagged {
+            return RevealResult::AlreadyFlagged;
+        }
+
+        if self.cells[idx].state == CellState::Revealed {
+            return RevealResult::AlreadyRevealed;
+        }
+
+        // Logic for hitting a bomb will be handled in game engine
+        if self.cells[idx].content == CellContent::Mine {
+            return RevealResult::HitMine;
+        }
+
+        self.cascade_open(idx);
+        RevealResult::Opened
+    }
+
+    // Performs an iterative DFS to reveal connected empty cells and their neighbors.
+    // This uses a a Vec to avoid stack overflow on large boards.
+    fn cascade_open(&mut self, idx: usize) {
+        let mut to_visit = vec![idx];
+
+        while let Some(idx) = to_visit.pop() {
+            if self.cells[idx].state == CellState::Revealed {
+                continue;
+            }
+            if let CellContent::Number(num) = self.cells[idx].content {
+                self.cells[idx].state = CellState::Revealed;
+                if num == 0 {
+                    let (x, y) = self.get_coords(idx);
+                    for neighbor_idx in self.get_neighbors_indices(x, y) {
+                        if self.cells[neighbor_idx].state != CellState::Revealed {
+                            to_visit.push(neighbor_idx);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl fmt::Display for Board {
@@ -150,10 +206,16 @@ impl fmt::Display for Board {
         for y in 0..self.height {
             for x in 0..self.width {
                 let idx = self.get_index(x, y);
-                match self.cells[idx].content {
-                    CellContent::Mine => write!(f, "● ")?,
-                    CellContent::Number(n) => write!(f, "{} ", n)?,
-                };
+                match self.cells[idx].state {
+                    CellState::Flagged => write!(f, "🚩")?,
+                    CellState::Hidden => write!(f, "■ ")?,
+                    CellState::Revealed => {
+                        match self.cells[idx].content {
+                            CellContent::Mine => write!(f, "● ")?,
+                            CellContent::Number(n) => write!(f, "{} ", n)?,
+                        };
+                    }
+                }
             }
             writeln!(f)?;
         }
@@ -168,6 +230,17 @@ mod test {
     #[fixture]
     fn small_board() -> Board {
         Board::new(5, 5)
+    }
+
+    #[fixture]
+    fn board_with_diagonal_mines() -> Board {
+        let mut board = Board::new(5, 5);
+        board.place_mine(4);
+        board.place_mine(8);
+        board.place_mine(12);
+        board.place_mine(16);
+        board.place_mine(20);
+        board
     }
 
     #[rstest]
@@ -253,5 +326,46 @@ mod test {
         board.get_neighbors_indices(x, y).iter().for_each(|&idx| {
             assert_eq!(CellContent::Number(1), board.cells[idx].content);
         });
+    }
+
+    #[rstest]
+    fn test_click_multiple_cells(mut board_with_diagonal_mines: Board) {
+        // TODO: Add test for flags when flagging is implemented
+        assert_eq!(
+            board_with_diagonal_mines.click_cell(4),
+            RevealResult::HitMine
+        );
+        assert_eq!(board_with_diagonal_mines.cells[4].state, CellState::Hidden);
+
+        assert_eq!(
+            board_with_diagonal_mines.click_cell(0),
+            RevealResult::Opened
+        );
+        assert_eq!(
+            board_with_diagonal_mines.click_cell(0),
+            RevealResult::AlreadyRevealed
+        );
+        assert_eq!(
+            board_with_diagonal_mines.click_cell(2),
+            RevealResult::AlreadyRevealed
+        );
+        assert_eq!(
+            board_with_diagonal_mines.cells[0].state,
+            CellState::Revealed
+        );
+        assert_eq!(
+            board_with_diagonal_mines.cells[2].state,
+            CellState::Revealed
+        );
+
+        assert_eq!(
+            board_with_diagonal_mines.click_cell(9),
+            RevealResult::Opened
+        );
+        assert_eq!(
+            board_with_diagonal_mines.cells[9].state,
+            CellState::Revealed
+        );
+        assert_eq!(board_with_diagonal_mines.cells[14].state, CellState::Hidden);
     }
 }
