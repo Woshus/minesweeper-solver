@@ -1,13 +1,6 @@
-use minesweeper_solver::board::Board;
+mod tui;
 
 fn main() {
-    let mut board = Board::new(100, 100);
-    board.generate_mines(0, 10);
-
-    println!("\n--- Board Generation Verification ---\n");
-    println!("{}", board);
-
-    board.click_cell(0);
-    println!("\n--- Board Generation Verification ---\n");
-    println!("{}", board);
+    let mut game = tui::TuiMinesweeperGame::new(10, 10, 10);
+    game.run();
 }

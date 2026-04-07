@@ -149,6 +149,14 @@ impl Board {
         }
     }
 
+    /// Checks whether the board has any `Hidden` cells left that aren't mines.
+    pub fn is_win_condition_met(&self) -> bool {
+        self.cells
+            .iter()
+            .filter(|cell| !matches!(cell.content, CellContent::Mine))
+            .all(|cell| matches!(cell.state, CellState::Revealed))
+    }
+
     /// Places a flag on a specified `Hidden` cell.
     pub fn place_flag(&mut self, idx: usize) {
         if self.cells[idx].state == CellState::Hidden {
@@ -159,6 +167,14 @@ impl Board {
     /// Removes a flag on a specified `Flagged` cell.
     pub fn remove_flag(&mut self, idx: usize) {
         if self.cells[idx].state == CellState::Flagged {
+            self.cells[idx].state = CellState::Hidden;
+        }
+    }
+
+    pub fn toggle_flag(&mut self, idx: usize) {
+        if self.cells[idx].state == CellState::Hidden {
+            self.cells[idx].state = CellState::Flagged;
+        } else if self.cells[idx].state == CellState::Flagged {
             self.cells[idx].state = CellState::Hidden;
         }
     }
@@ -377,7 +393,6 @@ mod test {
         let mut board = Board::new(5, 5);
         board.place_mine(12);
         board.place_mine(12);
-        
 
         board.get_neighbors_indices(12).iter().for_each(|&idx| {
             assert_eq!(CellContent::Number(1), board.cells[idx].content);
