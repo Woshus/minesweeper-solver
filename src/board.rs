@@ -80,17 +80,10 @@ impl Board {
         Some(&self.cells[index])
     }
 
-    fn get_index(&self, x: usize, y: usize) -> usize {
-        y * self.width + x
-    }
-
-    fn get_coords(&self, idx: usize) -> (usize, usize) {
-        (idx % self.width, idx / self.width)
-    }
-
-    fn get_neighbors_indices(&self, x: usize, y: usize) -> Vec<usize> {
+    fn get_neighbors_indices(&self, idx: usize) -> Vec<usize> {
         let mut neighbors = Vec::with_capacity(8);
 
+        let (x, y) = self.get_coords(idx);
         for x_offset in -1..=1 {
             for y_offset in -1..=1 {
                 if x_offset == 0 && y_offset == 0 {
@@ -123,13 +116,12 @@ impl Board {
     ///
     // TODO: Currently the start of a game can generate boards that start with CellContent::Number(1).
     // Consider adding guaranteed opening logic.
-    pub fn generate_mines(&mut self, start_x: usize, start_y: usize, total_mines: usize) {
+    pub fn generate_mines(&mut self, start_idx: usize, total_mines: usize) {
         assert!(
             total_mines <= self.cells.len(),
             "Cannot place more mines than cells available"
         );
         let mut rng = rng();
-        let start_idx = self.get_index(start_x, start_y);
 
         let mut indices: Vec<usize> = Vec::with_capacity(self.cells.len() - 1);
         indices.extend(0..start_idx);
@@ -150,8 +142,7 @@ impl Board {
 
         self.cells[idx].content = CellContent::Mine;
 
-        let (x, y) = self.get_coords(idx);
-        for neighbor_idx in self.get_neighbors_indices(x, y) {
+        for neighbor_idx in self.get_neighbors_indices(idx) {
             if let CellContent::Number(ref mut count) = self.cells[neighbor_idx].content {
                 *count += 1;
             }
@@ -205,9 +196,8 @@ impl Board {
         let CellContent::Number(num) = self.cells[idx].content else {
             return RevealResult::NoOp;
         };
-        // TODO: Standardize impl functions to all accept idx instead of x,y
-        let (x, y) = self.get_coords(idx);
-        let neighbors = self.get_neighbors_indices(x, y);
+
+        let neighbors = self.get_neighbors_indices(idx);
 
         let neighbor_flag_count = neighbors
             .iter()
@@ -236,7 +226,7 @@ impl Board {
     }
 
     // Performs an iterative DFS to reveal connected empty cells and their neighbors.
-    // This uses a a Vec to avoid stack overflow on large boards.
+    // This uses a Vec to avoid stack overflow on large boards.
     fn cascade_open(&mut self, idx: usize) {
         let mut to_visit = vec![idx];
 
@@ -247,8 +237,7 @@ impl Board {
             if let CellContent::Number(num) = self.cells[idx].content {
                 self.cells[idx].state = CellState::Revealed;
                 if num == 0 {
-                    let (x, y) = self.get_coords(idx);
-                    for neighbor_idx in self.get_neighbors_indices(x, y) {
+                    for neighbor_idx in self.get_neighbors_indices(idx) {
                         if self.cells[neighbor_idx].state != CellState::Revealed {
                             to_visit.push(neighbor_idx);
                         }
@@ -256,6 +245,16 @@ impl Board {
                 }
             }
         }
+    }
+
+    /// Converts a 2D coordinate (x, y) into a 1D linear index.
+    pub fn get_index(&self, x: usize, y: usize) -> usize {
+        y * self.width + x
+    }
+
+    /// Converts a 1D linear index into 2D coordinates (x,y).
+    pub fn get_coords(&self, idx: usize) -> (usize, usize) {
+        (idx % self.width, idx / self.width)
     }
 }
 
@@ -333,22 +332,22 @@ mod test {
 
     #[rstest]
     fn test_get_neighbors(small_board: Board) {
-        let mut neighbors = small_board.get_neighbors_indices(2, 2);
+        let mut neighbors = small_board.get_neighbors_indices(12);
         neighbors.sort();
         assert_eq!(neighbors, vec![6, 7, 8, 11, 13, 16, 17, 18]);
     }
 
     #[rstest]
     fn test_get_neighbors_edge_corner(small_board: Board) {
-        let mut neighbors = small_board.get_neighbors_indices(2, 0);
+        let mut neighbors = small_board.get_neighbors_indices(2);
         neighbors.sort();
         assert_eq!(neighbors, vec![1, 3, 6, 7, 8]);
 
-        let mut neighbors = small_board.get_neighbors_indices(0, 0);
+        let mut neighbors = small_board.get_neighbors_indices(0);
         neighbors.sort();
         assert_eq!(neighbors, vec![1, 5, 6]);
 
-        let mut neighbors = small_board.get_neighbors_indices(4, 4);
+        let mut neighbors = small_board.get_neighbors_indices(24);
         neighbors.sort();
         assert_eq!(neighbors, vec![18, 19, 23]);
     }
@@ -358,8 +357,7 @@ mod test {
         let mut board = Board::new(5, 5);
         board.place_mine(12);
 
-        let (x, y) = board.get_coords(12);
-        board.get_neighbors_indices(x, y).iter().for_each(|&idx| {
+        board.get_neighbors_indices(12).iter().for_each(|&idx| {
             assert_eq!(CellContent::Number(1), board.cells[idx].content);
         });
 
@@ -379,9 +377,9 @@ mod test {
         let mut board = Board::new(5, 5);
         board.place_mine(12);
         board.place_mine(12);
+        
 
-        let (x, y) = board.get_coords(12);
-        board.get_neighbors_indices(x, y).iter().for_each(|&idx| {
+        board.get_neighbors_indices(12).iter().for_each(|&idx| {
             assert_eq!(CellContent::Number(1), board.cells[idx].content);
         });
     }
