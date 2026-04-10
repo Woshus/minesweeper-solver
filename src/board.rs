@@ -29,12 +29,15 @@ pub struct Cell {
 pub struct Board {
     width: usize,
     height: usize,
+    mines: usize,
     cells: Vec<Cell>,
 }
 
 // TODO: Below NoOp's can be modified into actual functionality
 // - chord_cell() NoOp when not enough cells are flagged can highlight the cells
 // around it instead of NoOp.
+
+// TODO: Remove asserts for better checks to avoid panics
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RevealResult {
     HitMine,
@@ -51,16 +54,18 @@ impl Board {
     ///  # Panics
     ///
     /// Panics if `width` or `height` is 0.
-    pub fn new(width: usize, height: usize) -> Self {
+    pub fn new(width: usize, height: usize, mines: usize) -> Self {
         assert!(
             width > 0 && height > 0,
             "Dimensions must be greater than zero"
         );
+        assert!(mines < width*height, "Mines should be less than total squares");
         let total_cells = width * height;
 
         Self {
             width,
             height,
+            mines,
             cells: vec![
                 Cell {
                     content: CellContent::Number(0),
@@ -116,11 +121,9 @@ impl Board {
     ///
     // TODO: Currently the start of a game can generate boards that start with CellContent::Number(1).
     // Consider adding guaranteed opening logic.
-    pub fn generate_mines(&mut self, start_idx: usize, total_mines: usize) {
-        assert!(
-            total_mines <= self.cells.len(),
-            "Cannot place more mines than cells available"
-        );
+    // TODO: Because mine count was moved to struct, enforce that this cant be called twice,
+    // or reset the board upon call or other. 
+    pub fn generate_mines(&mut self, start_idx: usize) {
         let mut rng = rng();
 
         let mut indices: Vec<usize> = Vec::with_capacity(self.cells.len() - 1);
@@ -131,10 +134,13 @@ impl Board {
 
         indices
             .iter()
-            .take(total_mines)
+            .take(self.mines)
             .for_each(|&idx| self.place_mine(idx));
     }
 
+
+    // TODO: storing mine count in struct conflicts with this method. 
+    // Either keep this private so it cant be called, or handle increments or other. 
     fn place_mine(&mut self, idx: usize) {
         if matches!(self.cells[idx].content, CellContent::Mine) {
             return;
@@ -272,6 +278,13 @@ impl Board {
     pub fn get_coords(&self, idx: usize) -> (usize, usize) {
         (idx % self.width, idx / self.width)
     }
+
+    pub fn get_width(&self) -> usize {
+        self.width
+    }
+    pub fn get_height(&self) -> usize {
+        self.height
+    }
 }
 
 impl fmt::Display for Board {
@@ -302,12 +315,12 @@ mod test {
 
     #[fixture]
     fn small_board() -> Board {
-        Board::new(5, 5)
+        Board::new(5, 5, 0)
     }
 
     #[fixture]
     fn board_with_diagonal_mines() -> Board {
-        let mut board = Board::new(5, 5);
+        let mut board = Board::new(5, 5, 0);
         board.place_mine(4);
         board.place_mine(8);
         board.place_mine(12);
@@ -370,7 +383,7 @@ mod test {
 
     #[test]
     fn test_mine_placement() {
-        let mut board = Board::new(5, 5);
+        let mut board = Board::new(5, 5, 0);
         board.place_mine(12);
 
         board.get_neighbors_indices(12).iter().for_each(|&idx| {
@@ -390,7 +403,7 @@ mod test {
 
     #[test]
     fn test_double_placement_idempotency() {
-        let mut board = Board::new(5, 5);
+        let mut board = Board::new(5, 5, 0);
         board.place_mine(12);
         board.place_mine(12);
 

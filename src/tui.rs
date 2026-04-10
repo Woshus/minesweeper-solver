@@ -1,4 +1,4 @@
-use minesweeper_solver::board::{Board, RevealResult};
+use crate::board::{Board, RevealResult};
 use std::io::{self};
 
 // TODO: Reveal all cells on lost game
@@ -12,16 +12,14 @@ pub enum GameStatus {
 
 pub struct TuiMinesweeperGame {
     board: Board,
-    mines: usize,
     status: GameStatus,
 }
 
 impl TuiMinesweeperGame {
     pub fn new(width: usize, height: usize, mines: usize) -> Self {
         Self {
-            board: Board::new(width, height),
+            board: Board::new(width, height, mines),
             status: GameStatus::Created,
-            mines,
         }
     }
 
@@ -69,7 +67,7 @@ impl TuiMinesweeperGame {
     fn handle_click(&mut self, idx: usize) {
         // generate mines on first click
         if matches!(self.status, GameStatus::Created) {
-            self.board.generate_mines(idx, self.mines);
+            self.board.generate_mines(idx);
             self.status = GameStatus::Playing
         }
 
