@@ -59,7 +59,10 @@ impl Board {
             width > 0 && height > 0,
             "Dimensions must be greater than zero"
         );
-        assert!(mines < width*height, "Mines should be less than total squares");
+        assert!(
+            mines < width * height,
+            "Mines should be less than total squares"
+        );
         let total_cells = width * height;
 
         Self {
@@ -76,14 +79,14 @@ impl Board {
         }
     }
 
-    #[allow(dead_code)]
-    fn get_cell(&self, x: usize, y: usize) -> Option<&Cell> {
-        if x >= self.width || y >= self.height {
-            return None;
-        }
-        let index = self.get_index(x, y);
-        Some(&self.cells[index])
-    }
+    // #[allow(dead_code)]
+    // fn get_cell(&self, x: usize, y: usize) -> Option<&Cell> {
+    //     if x >= self.width || y >= self.height {
+    //         return None;
+    //     }
+    //     let index = self.get_index(x, y);
+    //     Some(&self.cells[index])
+    // }
 
     fn get_neighbors_indices(&self, idx: usize) -> Vec<usize> {
         let mut neighbors = Vec::with_capacity(8);
@@ -122,7 +125,7 @@ impl Board {
     // TODO: Currently the start of a game can generate boards that start with CellContent::Number(1).
     // Consider adding guaranteed opening logic.
     // TODO: Because mine count was moved to struct, enforce that this cant be called twice,
-    // or reset the board upon call or other. 
+    // or reset the board upon call or other.
     pub fn generate_mines(&mut self, start_idx: usize) {
         let mut rng = rng();
 
@@ -138,9 +141,8 @@ impl Board {
             .for_each(|&idx| self.place_mine(idx));
     }
 
-
-    // TODO: storing mine count in struct conflicts with this method. 
-    // Either keep this private so it cant be called, or handle increments or other. 
+    // TODO: storing mine count in struct conflicts with this method.
+    // Either keep this private so it cant be called, or handle increments or other.
     fn place_mine(&mut self, idx: usize) {
         if matches!(self.cells[idx].content, CellContent::Mine) {
             return;
@@ -161,20 +163,6 @@ impl Board {
             .iter()
             .filter(|cell| !matches!(cell.content, CellContent::Mine))
             .all(|cell| matches!(cell.state, CellState::Revealed))
-    }
-
-    /// Places a flag on a specified `Hidden` cell.
-    pub fn place_flag(&mut self, idx: usize) {
-        if self.cells[idx].state == CellState::Hidden {
-            self.cells[idx].state = CellState::Flagged;
-        }
-    }
-
-    /// Removes a flag on a specified `Flagged` cell.
-    pub fn remove_flag(&mut self, idx: usize) {
-        if self.cells[idx].state == CellState::Flagged {
-            self.cells[idx].state = CellState::Hidden;
-        }
     }
 
     pub fn toggle_flag(&mut self, idx: usize) {
@@ -285,6 +273,21 @@ impl Board {
     pub fn get_height(&self) -> usize {
         self.height
     }
+
+    pub fn get_mine_count(&self) -> usize {
+        self.mines
+    }
+
+    pub fn cell_iter(&self) -> impl Iterator<Item = (CellContent, CellState)> {
+        self.cells.iter().map(|cell| (cell.content, cell.state))
+    }
+
+    pub fn reveal_all_mines(&mut self) {
+        self.cells
+            .iter_mut()
+            .filter(|cell| cell.content == CellContent::Mine)
+            .for_each(|cell| cell.state = CellState::Revealed);
+    }
 }
 
 impl fmt::Display for Board {
@@ -342,22 +345,22 @@ mod test {
         assert_eq!(small_board.get_coords(4), (4, 0));
     }
 
-    #[rstest]
-    fn test_invalid_cell(small_board: Board) {
-        assert_eq!(small_board.get_cell(7, 7), None);
-        assert_eq!(small_board.get_cell(5, 5), None);
-    }
+    // #[rstest]
+    // fn test_invalid_cell(small_board: Board) {
+    //     assert_eq!(small_board.get_cell(7, 7), None);
+    //     assert_eq!(small_board.get_cell(5, 5), None);
+    // }
 
-    #[rstest]
-    fn test_valid_cell(small_board: Board) {
-        assert_eq!(
-            small_board.get_cell(4, 4),
-            Some(&Cell {
-                content: CellContent::Number(0),
-                state: CellState::Hidden
-            })
-        );
-    }
+    // #[rstest]
+    // fn test_valid_cell(small_board: Board) {
+    //     assert_eq!(
+    //         small_board.get_cell(4, 4),
+    //         Some(&Cell {
+    //             content: CellContent::Number(0),
+    //             state: CellState::Hidden
+    //         })
+    //     );
+    // }
 
     #[rstest]
     fn test_get_neighbors(small_board: Board) {
@@ -451,12 +454,12 @@ mod test {
     fn test_flagging_and_unflagging(mut board_with_diagonal_mines: Board) {
         board_with_diagonal_mines.click_cell(0);
         assert_eq!(board_with_diagonal_mines.cells[12].state, CellState::Hidden);
-        board_with_diagonal_mines.place_flag(12);
+        board_with_diagonal_mines.toggle_flag(12);
         assert_eq!(
             board_with_diagonal_mines.cells[12].state,
             CellState::Flagged
         );
-        board_with_diagonal_mines.remove_flag(12);
+        board_with_diagonal_mines.toggle_flag(12);
         assert_eq!(board_with_diagonal_mines.cells[12].state, CellState::Hidden);
     }
 
@@ -468,15 +471,15 @@ mod test {
         assert_eq!(board_with_diagonal_mines.chord_cell(7), RevealResult::NoOp);
 
         // Too Little / Too Many Flags
-        board_with_diagonal_mines.place_flag(8);
+        board_with_diagonal_mines.toggle_flag(8);
         assert_eq!(board_with_diagonal_mines.chord_cell(7), RevealResult::NoOp);
 
-        board_with_diagonal_mines.place_flag(2);
-        board_with_diagonal_mines.place_flag(3);
+        board_with_diagonal_mines.toggle_flag(2);
+        board_with_diagonal_mines.toggle_flag(3);
         assert_eq!(board_with_diagonal_mines.chord_cell(7), RevealResult::NoOp);
 
         // Wrong Flags
-        board_with_diagonal_mines.remove_flag(3);
+        board_with_diagonal_mines.toggle_flag(3);
         assert_eq!(
             board_with_diagonal_mines.chord_cell(7),
             RevealResult::HitMine
@@ -486,8 +489,8 @@ mod test {
     #[rstest]
     fn test_chord_cell_success(mut board_with_diagonal_mines: Board) {
         board_with_diagonal_mines.click_cell(7);
-        board_with_diagonal_mines.place_flag(8);
-        board_with_diagonal_mines.place_flag(12);
+        board_with_diagonal_mines.toggle_flag(8);
+        board_with_diagonal_mines.toggle_flag(12);
         assert_eq!(
             board_with_diagonal_mines.chord_cell(7),
             RevealResult::Chorded
