@@ -82,8 +82,8 @@ impl MinesweeperGame {
 
     //TODO: Instead of hardcoding the board size here, take input from UI or some selection
     // to specify board sizing reset(&mut self, x, y, mines)
-    pub fn reset(&mut self) {
-        self.board = Board::new(10, 10, 10);
+    pub fn reset(&mut self, x: usize, y: usize, mines: usize) {
+        self.board = Board::new(x, y, mines);
         self.status = GameStatus::Created;
     }
 }

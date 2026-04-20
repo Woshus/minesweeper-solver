@@ -1,23 +1,19 @@
-use crate::game::{self, CellDisplay, GameStatus};
+use crate::{
+    components::DifficultySelector,
+    game::{self, CellDisplay, GameStatus},
+};
 use eframe::egui;
 use std::char;
 pub struct MinesweeperSolver {
     game: game::MinesweeperGame,
+    difficulty_selector: DifficultySelector,
 }
-
-// impl Default for MinesweeperSolver {
-//     fn default() -> Self {
-//         Self {
-//             name: "Arthur".to_owned(),
-//             age: 42,
-//         }
-//     }
-// }
 
 impl MinesweeperSolver {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         Self {
             game: game::MinesweeperGame::new(10, 10, 10),
+            difficulty_selector: DifficultySelector::new(),
         }
     }
 
@@ -49,8 +45,15 @@ impl eframe::App for MinesweeperSolver {
             }
         };
 
+        // TODO : Make it so that the board automatically resets when the difficulty/board size is changed
+        let _difficulty_info = self.difficulty_selector.difficulty_menu(ui);
+
         if ui.button("RESTART").clicked() {
-            self.game.reset();
+            self.game.reset(
+                self.difficulty_selector.cols(),
+                self.difficulty_selector.rows(),
+                self.difficulty_selector.mines(),
+            );
         }
 
         ui.vertical_centered(|ui| {
