@@ -24,7 +24,7 @@ impl DifficultySelector {
         }
     }
 
-    pub fn difficulty_menu(&mut self, ui: &mut egui::Ui) {
+    pub fn ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             if ui
                 .selectable_value(&mut self.difficulty, Difficulty::Beginner, "Beginner")
