@@ -1,9 +1,14 @@
+/* TODOs
+    - Add import/export functionality to boards
+*/
+
 //! # Minesweeper Board Engine
 //!
 //! This module provides the core logic for generating and managing a Minesweeper board.
 
 use rand::rng;
 use rand::seq::SliceRandom;
+use std::collections::HashMap;
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -31,6 +36,11 @@ pub struct Board {
     height: usize,
     mines: usize,
     cells: Vec<Cell>,
+}
+
+// TODO: Type Aliasing for clarity
+pub struct Probabilities {
+    pub data: HashMap<usize, f32>,
 }
 
 // TODO: Below NoOp's can be modified into actual functionality
@@ -87,6 +97,38 @@ impl Board {
     //     let index = self.get_index(x, y);
     //     Some(&self.cells[index])
     // }
+
+    // This function returns every hidden cell that has a revealed number attached to it
+    fn get_frontier_cell_indices(&self) -> Vec<usize> {
+        self.cells
+            .iter()
+            .enumerate()
+            .filter(|(_, cell)| matches!(cell.state, CellState::Hidden))
+            .filter(|(idx, _)| self.is_touching_revealed_number(*idx))
+            .map(|(idx, _)| idx)
+            .collect()
+    }
+
+    // Helper for get_frontier_cell_indices
+    fn is_touching_revealed_number(&self, idx: usize) -> bool {
+        self.get_neighbors_indices(idx).iter().any(|&neighbor_idx| {
+            let neighbor = &self.cells[neighbor_idx];
+            matches!(
+                (neighbor.state, neighbor.content),
+                (CellState::Revealed, CellContent::Number(_))
+            )
+        })
+    }
+
+    // TODO: Pseudocode for calculating probabiltiies
+    // Get Frontier Cells
+    // Segment Frontier Cells
+    // Create HashMap::new()
+    // for each segment {
+    //      attempt to solve segment and calculate probabilities 0-100
+    // }
+    // Return a list of cell indices and probabilities
+    // pub fn calculate_probabiltiies(&self) -> Probabilities {}
 
     fn get_neighbors_indices(&self, idx: usize) -> Vec<usize> {
         let mut neighbors = Vec::with_capacity(8);
@@ -313,6 +355,8 @@ impl fmt::Display for Board {
 }
 
 mod test {
+    use crate::board;
+
     use super::*;
     use rstest::*;
 
@@ -508,5 +552,12 @@ mod test {
             CellState::Revealed
         );
         assert_eq!(board_with_diagonal_mines.cells[24].state, CellState::Hidden);
+    }
+
+    #[rstest]
+    fn test_get_frontier_cells(mut board_with_diagonal_mines: Board) {
+        board_with_diagonal_mines.click_cell(0);
+        let frontier_cells = board_with_diagonal_mines.get_frontier_cell_indices();
+        assert_eq!(frontier_cells, vec![3, 8, 12, 13, 15, 16, 17])
     }
 }
