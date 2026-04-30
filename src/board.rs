@@ -1,5 +1,11 @@
 /* TODOs
     - Add import/export functionality to boards
+    - Finish probability calcuation
+    - Add Best Move Calculation (lowest probability safe move, that has high chance of progress)
+    - Add Efficiency Solver
+    - Add Move Options for optimal efficiency (places to click that will not lose clicks given a current state, known upk)
+    - " for unknown upk. Big Problem. Assign weights to moves?
+    - This file may be getting too big, perhaps separate probabiltity calculation/efficiency calculations into separate files
 */
 
 //! # Minesweeper Board Engine
@@ -8,9 +14,9 @@
 
 use rand::rng;
 use rand::seq::SliceRandom;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
-
+type Segment = Vec<usize>;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CellContent {
     Mine,
@@ -98,12 +104,89 @@ impl Board {
     //     Some(&self.cells[index])
     // }
 
-    // This function returns every hidden cell that has a revealed number attached to it
+    // TODO: Pseudocode for calculating probabiltiies
+    // Get Frontier Cells - Done
+    // Segment Frontier Cells - Done
+    // Create HashMap::new()
+    // for each segment {
+    //      attempt to solve segment and calculate probabilities 0-100
+    // }
+    // Return a list of cell indices and probabilities
+    // pub fn calculate_probabiltiies(&self) -> Probabilities {}
+
+    // Only returns revealed neighbors that are numbers
+    // Note: This should only be called with the idx of a hidden cell. At least with its current usage in
+    // finding probabilities.
+    fn get_adjacent_revealed_numbers(&self, idx: usize) -> Vec<usize> {
+        self.get_neighbors_indices(idx)
+            .into_iter()
+            .filter(|&neighbor_idx| {
+                let cell = &self.cells[neighbor_idx];
+                cell.state == CellState::Revealed && matches!(cell.content, CellContent::Number(_))
+            })
+            .collect()
+    }
+
+    // This returns a list of cells to be used in probability calculation.
+    // Note: Connected in this context means that the cells share at least 1 revealed
+    // cell with a number in it.
+    // Note: This might seem roundabout but it prevents overlap of "unconnected"
+    // cells. refer to test_get_frontier_multiple_segment()
+    #[allow(dead_code)]
+    fn get_connected_frontier_cells(&self, cell_idx: usize, frontier: &[usize]) -> Vec<usize> {
+        let mut connected = Vec::new();
+        let clues = self.get_adjacent_revealed_numbers(cell_idx);
+
+        for clue_idx in clues {
+            let neighbors_of_clue = self.get_neighbors_indices(clue_idx);
+            for neighbor_idx in neighbors_of_clue {
+                if frontier.contains(&neighbor_idx) && neighbor_idx != cell_idx {
+                    connected.push(neighbor_idx);
+                }
+            }
+        }
+        connected
+    }
+
+    // This function separates a list of cells into segments that are separate probabilistic regions.
+    #[allow(dead_code)]
+    fn get_isolated_frontier_segments(&self, frontier_cells: &[usize]) -> Vec<Segment> {
+        let mut segments = Vec::new();
+        let mut visited = HashSet::new();
+
+        for &start_node in frontier_cells {
+            if visited.contains(&start_node) {
+                continue;
+            }
+
+            let mut current_segment = Vec::new();
+            let mut queue = VecDeque::from([start_node]);
+            visited.insert(start_node);
+
+            while let Some(cell_idx) = queue.pop_front() {
+                current_segment.push(cell_idx);
+
+                for neighbor in self.get_connected_frontier_cells(cell_idx, frontier_cells) {
+                    if !visited.contains(&neighbor) {
+                        visited.insert(neighbor);
+                        queue.push_back(neighbor);
+                    }
+                }
+            }
+            segments.push(current_segment);
+        }
+
+        segments
+    }
+    // This function returns every hidden cell (includes flagged cells) that has a revealed number attached to it
+    #[allow(dead_code)]
     fn get_frontier_cell_indices(&self) -> Vec<usize> {
         self.cells
             .iter()
             .enumerate()
-            .filter(|(_, cell)| matches!(cell.state, CellState::Hidden))
+            .filter(|(_, cell)| {
+                matches!(cell.state, CellState::Hidden) | matches!(cell.state, CellState::Flagged)
+            })
             .filter(|(idx, _)| self.is_touching_revealed_number(*idx))
             .map(|(idx, _)| idx)
             .collect()
@@ -119,16 +202,6 @@ impl Board {
             )
         })
     }
-
-    // TODO: Pseudocode for calculating probabiltiies
-    // Get Frontier Cells
-    // Segment Frontier Cells
-    // Create HashMap::new()
-    // for each segment {
-    //      attempt to solve segment and calculate probabilities 0-100
-    // }
-    // Return a list of cell indices and probabilities
-    // pub fn calculate_probabiltiies(&self) -> Probabilities {}
 
     fn get_neighbors_indices(&self, idx: usize) -> Vec<usize> {
         let mut neighbors = Vec::with_capacity(8);
@@ -355,8 +428,6 @@ impl fmt::Display for Board {
 }
 
 mod test {
-    use crate::board;
-
     use super::*;
     use rstest::*;
 
@@ -559,5 +630,85 @@ mod test {
         board_with_diagonal_mines.click_cell(0);
         let frontier_cells = board_with_diagonal_mines.get_frontier_cell_indices();
         assert_eq!(frontier_cells, vec![3, 8, 12, 13, 15, 16, 17])
+    }
+
+    #[rstest]
+    fn test_get_frontier_segments(mut board_with_diagonal_mines: Board) {
+        board_with_diagonal_mines.click_cell(0);
+        let frontier_cells = board_with_diagonal_mines.get_frontier_cell_indices();
+        let frontier_segments =
+            board_with_diagonal_mines.get_isolated_frontier_segments(&frontier_cells);
+
+        assert_eq!(frontier_segments, [[3, 8, 12, 13, 15, 16, 17]]);
+
+        board_with_diagonal_mines.click_cell(24);
+        let frontier_cells = board_with_diagonal_mines.get_frontier_cell_indices();
+        let mut frontier_segments =
+            board_with_diagonal_mines.get_isolated_frontier_segments(&frontier_cells);
+
+        frontier_segments
+            .iter_mut()
+            .for_each(|segment| segment.sort());
+        assert_eq!(frontier_segments, [[3, 8, 9, 12, 15, 16, 21]]);
+    }
+    #[test]
+    fn test_get_frontier_multiple_segments() {
+        let mut board = Board::new(10, 10, 0);
+        let mine_placements = [2, 3, 7, 20, 22, 27, 29, 30, 33];
+        for mine_idx in mine_placements {
+            board.place_mine(mine_idx);
+        }
+        board.click_cell(0);
+        let mut frontier_cells = board.get_frontier_cell_indices();
+        frontier_cells.sort();
+        assert_eq!(frontier_cells, [2, 12, 20, 21, 22]);
+
+        let mut frontier_segments = board.get_isolated_frontier_segments(&frontier_cells);
+        frontier_segments
+            .iter_mut()
+            .for_each(|segment| segment.sort());
+        assert_eq!(frontier_segments, [[2, 12, 20, 21, 22]]);
+
+        // create new opening
+        board.click_cell(99);
+        let mut frontier_cells = board.get_frontier_cell_indices();
+        frontier_cells.sort();
+        assert_eq!(
+            frontier_cells,
+            [
+                2, 3, 7, 12, 13, 17, 20, 21, 22, 23, 27, 28, 29, 30, 31, 32, 33
+            ]
+        );
+
+        // Get segments, there should be 3 segments.
+        let mut frontier_segments = board.get_isolated_frontier_segments(&frontier_cells);
+        frontier_segments
+            .iter_mut()
+            .for_each(|segment| segment.sort());
+
+        assert_eq!(
+            frontier_segments,
+            [
+                vec![2, 12, 20, 21, 22],
+                vec![3, 13, 23, 30, 31, 32, 33],
+                vec![7, 17, 27, 28, 29]
+            ]
+        );
+
+        // now click idx 32, should create two merged segments and exclude cell 32.
+        board.click_cell(32);
+        let frontier_cells = board.get_frontier_cell_indices();
+        let mut frontier_segments = board.get_isolated_frontier_segments(&frontier_cells);
+        frontier_segments
+            .iter_mut()
+            .for_each(|segment| segment.sort());
+
+        assert_eq!(
+            frontier_segments,
+            [
+                vec![2, 3, 12, 13, 20, 21, 22, 23, 30, 31, 33],
+                vec![7, 17, 27, 28, 29]
+            ]
+        );
     }
 }
