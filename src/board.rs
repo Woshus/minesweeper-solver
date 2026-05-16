@@ -16,6 +16,7 @@ use rand::rng;
 use rand::seq::SliceRandom;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
+
 type Segment = Vec<usize>;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CellContent {
@@ -44,10 +45,22 @@ pub struct Board {
     cells: Vec<Cell>,
 }
 
-// TODO: Type Aliasing for clarity
-pub struct Probabilities {
-    pub data: HashMap<usize, f32>,
+#[derive(Debug, Clone, PartialEq)]
+pub struct SegmentResult {
+    pub cell_indices: Vec<usize>,
+    pub total_ways_per_mine_count: HashMap<usize, usize>,
+    pub cell_mine_tallies_by_count: HashMap<usize, Vec<usize>>,
 }
+
+// TODO: Type Aliasing for clarity
+// Note, if this needs
+type CellIndex = usize;
+type CellProbability = f32;
+type Probabilities = HashMap<CellIndex, CellProbability>;
+
+// pub struct Probabilities {
+//     pub data: HashMap<usize, f32>,
+// }
 
 // TODO: Below NoOp's can be modified into actual functionality
 // - chord_cell() NoOp when not enough cells are flagged can highlight the cells
@@ -104,16 +117,156 @@ impl Board {
     //     Some(&self.cells[index])
     // }
 
-    // TODO: Pseudocode for calculating probabiltiies
-    // Get Frontier Cells - Done
-    // Segment Frontier Cells - Done
-    // Create HashMap::new()
-    // for each segment {
-    //      attempt to solve segment and calculate probabilities 0-100
-    // }
-    // Return a list of cell indices and probabilities
-    // pub fn calculate_probabiltiies(&self) -> Probabilities {}
+    /*
+       TODO: Pseudocode for calculating probabiltiies
+       Get Segmented Frontier Cells
+       Get floating cell count
+       for each segment {
 
+
+            attempt to solve segment and calculate probabilities 0-100
+       }
+       Return a list of cell indices and probabilities
+
+
+
+
+    */
+
+    /*
+       Returns a struct containing the original segment, and its possible
+       legal configuration counts for each cell.
+    */
+    #[allow(dead_code)]
+    fn get_possible_orientations(&self, segment: &Vec<usize>) -> SegmentResult {
+        // SegmentResult contains all necessary information needed to calculate cell
+        // probabilities for later.
+
+        let mut result = SegmentResult {
+            cell_indices: segment.clone(),
+            total_ways_per_mine_count: HashMap::new(),
+            cell_mine_tallies_by_count: HashMap::new(),
+        };
+
+        // contains all clues adjacent to the current segment, set to prevent duplicates
+        let mut relevant_clues = HashSet::new();
+        for &cell_idx in segment {
+            for neighbor in self.get_adjacent_revealed_numbers(cell_idx) {
+                relevant_clues.insert(neighbor);
+            }
+        }
+
+        // transform clues to be readily used
+        let relevant_clues: Vec<(usize, i32)> = relevant_clues
+            .into_iter()
+            .map(|idx| {
+                if let CellContent::Number(num) = self.cells[idx].content {
+                    (idx, num as i32)
+                } else {
+                    panic!("Clue at {} is not a number", idx);
+                }
+            })
+            .collect();
+
+        let mut current_config = vec![false; segment.len()];
+
+        fn rec_get_orientations(
+            board: &Board,
+            config_idx: usize,
+            config: &mut Vec<bool>,
+            segment: &Vec<usize>,
+            clues: &Vec<(usize, i32)>,
+            result: &mut SegmentResult,
+        ) {
+            for &(clue_idx, clue_value) in clues {
+                let neighbors = board.get_neighbors_indices(clue_idx);
+                let mut confirmed_mines = 0;
+                let mut undecided_hidden = 0;
+
+                for n_idx in neighbors {
+                    if let Some(pos_in_seg) = segment.iter().position(|&x| x == n_idx) {
+                        if pos_in_seg < config_idx {
+                            if config[pos_in_seg] {
+                                confirmed_mines += 1;
+                            }
+                        } else {
+                            undecided_hidden += 1;
+                        }
+                    }
+                }
+
+                if confirmed_mines > clue_value || confirmed_mines + undecided_hidden < clue_value {
+                    return;
+                }
+            }
+
+            if config_idx == segment.len() {
+                let mine_count = config.iter().filter(|&&m| m).count();
+                *result
+                    .total_ways_per_mine_count
+                    .entry(mine_count)
+                    .or_insert(0) += 1;
+                let tallies = result
+                    .cell_mine_tallies_by_count
+                    .entry(mine_count)
+                    .or_insert(vec![0; segment.len()]);
+                for (i, &is_mine) in config.iter().enumerate() {
+                    if is_mine {
+                        tallies[i] += 1;
+                    }
+                }
+                return;
+            }
+            config[config_idx] = false;
+            rec_get_orientations(board, config_idx + 1, config, segment, clues, result);
+
+            config[config_idx] = true;
+            rec_get_orientations(board, config_idx + 1, config, segment, clues, result);
+        }
+
+        rec_get_orientations(
+            self,
+            0,
+            &mut current_config,
+            segment,
+            &relevant_clues,
+            &mut result,
+        );
+        result
+    }
+
+    #[allow(dead_code, unused)]
+    pub fn calculate_probabilities(&self) -> Probabilities {
+        let frontier_cells = self.get_frontier_cell_indices();
+        let frontier_segments = self.get_isolated_frontier_segments(&frontier_cells);
+        let probabilities = Probabilities::new();
+
+        // Calculate remaining floating cells
+        let floating_cells = self.get_floating_count();
+        // Calculate Floating Density
+        for segment in frontier_segments {
+            let orientations = self.get_possible_orientations(&segment);
+        }
+
+        probabilities
+    }
+
+    // A floating cell is defined here as a cell where all of the cells neighbors are hidden and
+    // the cell itself is also hidden.
+    fn get_floating_count(&self) -> usize {
+        self.cells
+            .iter()
+            .enumerate()
+            .filter(|(_, cell)| matches!(cell.state, CellState::Hidden))
+            .filter(|(cell_idx, _)| {
+                self.get_neighbors_indices(*cell_idx)
+                    .iter()
+                    .all(|neighbor_idx| {
+                        matches!(self.cells[*neighbor_idx].state, CellState::Hidden)
+                    })
+            })
+            .count()
+    }
     // Only returns revealed neighbors that are numbers
     // Note: This should only be called with the idx of a hidden cell. At least with its current usage in
     // finding probabilities.
@@ -709,6 +862,57 @@ mod test {
                 vec![2, 3, 12, 13, 20, 21, 22, 23, 30, 31, 33],
                 vec![7, 17, 27, 28, 29]
             ]
+        );
+    }
+
+    #[rstest]
+    fn test_floating_cell_count(mut board_with_diagonal_mines: Board) {
+        board_with_diagonal_mines.click_cell(0);
+        let floating_count = board_with_diagonal_mines.get_floating_count();
+        assert_eq!(floating_count, 10);
+    }
+
+    #[rstest]
+    fn test_get_possible_orientations(mut board_with_diagonal_mines: Board) {
+        board_with_diagonal_mines.click_cell(0);
+        let frontier_cells = board_with_diagonal_mines.get_frontier_cell_indices();
+        let segments = board_with_diagonal_mines.get_isolated_frontier_segments(&frontier_cells);
+        let orientations = board_with_diagonal_mines.get_possible_orientations(&segments[0]);
+        assert_eq!(
+            orientations.total_ways_per_mine_count,
+            HashMap::from([(3, 4)])
+        );
+        assert_eq!(
+            orientations.cell_mine_tallies_by_count,
+            HashMap::from([(3, vec![2, 2, 4, 0, 2, 2, 0])])
+        );
+        println!("{:?}", orientations);
+    }
+
+    #[test]
+    fn test_get_possible_orientations_mult() {
+        let mut board = Board::new(10, 10, 0);
+        let mine_placements = [2, 3, 7, 15, 20, 22, 27, 29, 30, 33];
+        for mine_idx in mine_placements {
+            board.place_mine(mine_idx);
+        }
+
+        board.click_cell(99);
+        let frontier_cells = board.get_frontier_cell_indices();
+        let segments = board.get_isolated_frontier_segments(&frontier_cells);
+        let second_segment_orientations = board.get_possible_orientations(&segments[0]);
+
+        assert_eq!(
+            second_segment_orientations.total_ways_per_mine_count,
+            HashMap::from([(6, 2), (5, 1)])
+        );
+
+        assert_eq!(
+            second_segment_orientations.cell_mine_tallies_by_count,
+            HashMap::from([
+                (6, vec![1, 0, 2, 1, 0, 0, 0, 1, 1, 2, 2, 0, 2]),
+                (5, vec![0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 0, 1])
+            ])
         );
     }
 }
