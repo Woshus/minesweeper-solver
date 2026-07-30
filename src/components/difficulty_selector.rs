@@ -14,8 +14,8 @@ pub struct DifficultySelector {
     mines: usize,
 }
 
-impl DifficultySelector {
-    pub fn new() -> Self {
+impl Default for DifficultySelector {
+    fn default() -> Self {
         Self {
             difficulty: Difficulty::Beginner,
             rows: 10,
@@ -23,7 +23,8 @@ impl DifficultySelector {
             mines: 10,
         }
     }
-
+}
+impl DifficultySelector {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             if ui

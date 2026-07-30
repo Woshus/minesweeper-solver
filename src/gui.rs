@@ -1,16 +1,26 @@
-use crate::components::{DifficultySelector, MinesweeperGame, game::CellDisplay, game::GameStatus};
+use crate::components::{DifficultySelector, MinesweeperGame, prob_solver::ProbabilitySolver};
 use eframe::egui;
-use std::char;
+
+#[derive(PartialEq, Copy, Clone, Debug)]
+enum Tab {
+    Game,
+    Solver,
+}
+
 pub struct MinesweeperSolver {
+    active_tab: Tab,
     game: MinesweeperGame,
+    solver: ProbabilitySolver,
     difficulty_selector: DifficultySelector,
 }
 
 impl MinesweeperSolver {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         Self {
+            active_tab: Tab::Game,
             game: MinesweeperGame::new(10, 10, 10),
-            difficulty_selector: DifficultySelector::new(),
+            solver: ProbabilitySolver::new(10, 10, 10),
+            difficulty_selector: DifficultySelector::default(),
         }
     }
 }
@@ -18,20 +28,42 @@ impl MinesweeperSolver {
 // TODO: Top Level ui call should handle control flow, functional elements can be placed elsewhere.
 impl eframe::App for MinesweeperSolver {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        
-        // Game Tab 
-        
-         // TODO : Make it so that the board automatically resets when the difficulty/board size is changed
-        let _difficulty_info = self.difficulty_selector.ui(ui);
+        egui::Panel::top("solver-menu").show_inside(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.add_space(10.0);
+                let game_tab = ui.selectable_value(&mut self.active_tab, Tab::Game, "Play Game");
+                let solver_tab =
+                    ui.selectable_value(&mut self.active_tab, Tab::Solver, "Solver Tool");
 
-        if ui.button("RESTART").clicked() {
-            self.game.reset(
-                self.difficulty_selector.cols(),
-                self.difficulty_selector.rows(),
-                self.difficulty_selector.mines(),
-            );
+                if self.active_tab == Tab::Game {
+                    game_tab.highlight();
+                } else {
+                    solver_tab.highlight();
+                }
+
+                ui.separator();
+            })
+        });
+
+        match self.active_tab {
+            Tab::Game => {
+                self.difficulty_selector.ui(ui);
+
+                if ui.button("RESTART").clicked() {
+                    self.game.reset(
+                        self.difficulty_selector.cols(),
+                        self.difficulty_selector.rows(),
+                        self.difficulty_selector.mines(),
+                    );
+                }
+                self.game.ui(ui);
+            }
+            Tab::Solver => {
+                self.solver.ui(ui);
+            }
         }
+        // Game Tab
 
-        self.game.ui(ui);
+        // TODO : Make it so that the board automatically resets when the difficulty/board size is changed
     }
 }
