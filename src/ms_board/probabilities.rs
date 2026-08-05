@@ -1,4 +1,4 @@
-use super::{Board, Cell, CellContent, CellState};
+use super::{Board, CellContent, CellState};
 use std::collections::{HashMap, HashSet, VecDeque};
 #[derive(Debug, Clone, PartialEq)]
 pub struct SegmentResult {
@@ -39,45 +39,6 @@ fn convolve(
         }
     }
     result
-}
-
-fn deconvolve(global: &HashMap<usize, f64>, segment: &HashMap<usize, f64>) -> HashMap<usize, f64> {
-    // Find the minimum key in the segment polynomial (its "offset").
-    let seg_min = segment.keys().copied().min().unwrap_or(0);
-    // Shift segment so it starts at 0.
-    let seg_shifted: HashMap<usize, f64> =
-        segment.iter().map(|(&k, &v)| (k - seg_min, v)).collect();
-
-    let global_max = global.keys().copied().max().unwrap_or(0);
-    let seg_max_shifted = seg_shifted.keys().copied().max().unwrap_or(0);
-    let partner_max = global_max.saturating_sub(seg_min);
-
-    let seg0 = *seg_shifted.get(&0).unwrap_or(&0.0);
-    assert!(
-        seg0 != 0.0,
-        "deconvolve: segment polynomial has no constant term after shift"
-    );
-
-    let mut partner: HashMap<usize, f64> = HashMap::new();
-
-    for k in 0..=partner_max {
-        // global[k + seg_min] = Σ_{j=0}^{min(k, seg_max_shifted)} seg_shifted[j] * partner[k-j]
-        let global_k = *global.get(&(k + seg_min)).unwrap_or(&0.0);
-        let mut acc = global_k;
-        for j in 1..=k.min(seg_max_shifted) {
-            if let Some(&sv) = seg_shifted.get(&j) {
-                if let Some(&pv) = partner.get(&(k - j)) {
-                    acc -= sv * pv;
-                }
-            }
-        }
-        let val = acc / seg0;
-        if val.abs() > 1e-9 {
-            partner.insert(k, val);
-        }
-    }
-
-    partner
 }
 
 impl Board {
@@ -196,9 +157,10 @@ impl Board {
                             continue;
                         }
 
-                        cell_numerator += cell_mine_configs
+                        let term = cell_mine_configs
                             * rest_weight
                             * binom(&binom_table, floating_cells, float_mines);
+                        cell_numerator += term;
                     }
                 }
 
@@ -242,6 +204,187 @@ impl Board {
 
             let prob = (float_numerator / total_weight) as f32;
             probabilities.insert(float_idx, prob);
+        }
+
+        probabilities
+    }
+
+    /// Brute-force variant: do not split the frontier into segments.
+    /// Enumerates all assignments for the whole frontier (respecting flags)
+    /// and weights each full assignment by the number of choices for floating cells.
+    /// This is slower but simpler and useful for debugging discrepancies.
+    pub fn calculate_probabilities_no_split(&self) -> Probabilities {
+        let frontier_cells = self.get_frontier_cell_indices();
+        let mut probabilities: Probabilities = Probabilities::new();
+
+        let floating_cells = self.get_floating_count();
+        let mines_remaining = self.get_mines_remaining();
+
+        if mines_remaining == 0 {
+            for (idx, cell) in self.cells.iter().enumerate() {
+                if matches!(cell.state, CellState::Hidden | CellState::Flagged) {
+                    probabilities.insert(idx, 0.0);
+                }
+            }
+            return probabilities;
+        }
+
+        let binom_table = build_binom_table(floating_cells.max(1));
+
+        // Build clue list relevant to the frontier
+        let mut relevant_clues = HashSet::new();
+        for &cell_idx in &frontier_cells {
+            for neighbor in self.get_adjacent_revealed_numbers(cell_idx) {
+                relevant_clues.insert(neighbor);
+            }
+        }
+        let relevant_clues: Vec<(usize, i32)> = relevant_clues
+            .into_iter()
+            .map(|idx| {
+                if let CellContent::Number(num) = self.cells[idx].content {
+                    (idx, num as i32)
+                } else {
+                    panic!("Clue at {} is not a number", idx);
+                }
+            })
+            .collect();
+
+        // Map cell index -> position in frontier
+        let mut pos_map: Vec<Option<usize>> = vec![None; self.cells.len()];
+        for (i, &idx) in frontier_cells.iter().enumerate() {
+            pos_map[idx] = Some(i);
+        }
+
+        let forced_flags: Vec<bool> = frontier_cells
+            .iter()
+            .map(|&idx| matches!(self.cells[idx].state, CellState::Flagged))
+            .collect();
+
+        let variable_positions: Vec<usize> = (0..frontier_cells.len())
+            .filter(|&i| !forced_flags[i])
+            .collect();
+
+        let var_len = variable_positions.len();
+
+        let mut total_weight: f64 = 0.0;
+        let mut numerators: Vec<f64> = vec![0.0; frontier_cells.len()];
+
+        // Iterate all assignments over variable positions
+        if var_len <= 62 {
+            let max_mask: u128 = if var_len == 128 {
+                u128::MAX
+            } else {
+                (1u128 << var_len) - 1
+            };
+            let mut mask = 0u128;
+            while mask <= max_mask {
+                // build config for frontier
+                let mut config = vec![false; frontier_cells.len()];
+                for (i, &f) in forced_flags.iter().enumerate() {
+                    config[i] = f;
+                }
+                let mut mines_in_frontier = 0usize;
+                for (bit_pos, &pos) in variable_positions.iter().enumerate() {
+                    let bit = ((mask >> bit_pos) & 1) != 0;
+                    config[pos] = bit;
+                    if bit {
+                        mines_in_frontier += 1;
+                    }
+                }
+
+                // include forced flags in mine count
+                mines_in_frontier += forced_flags.iter().filter(|&&b| b).count();
+
+                if mines_in_frontier > mines_remaining {
+                    mask = mask.wrapping_add(1);
+                    if mask == 0 {
+                        break;
+                    }
+                    continue;
+                }
+
+                // validate clues: confirmed mines among frontier neighbors must be <= clue
+                // and the remaining mines required by the clue must be possible to place among
+                // the non-frontier hidden neighbors (floating neighbors).
+                let mut valid = true;
+                for &(clue_idx, clue_value) in &relevant_clues {
+                    let mut confirmed = 0i32;
+                    let mut non_frontier_hidden = 0i32;
+                    for n in self.get_neighbors_indices(clue_idx) {
+                        if let Some(pos) = pos_map[n] {
+                            if config[pos] {
+                                confirmed += 1;
+                            }
+                        } else {
+                            if matches!(self.cells[n].state, CellState::Hidden) {
+                                non_frontier_hidden += 1;
+                            }
+                        }
+                    }
+                    if confirmed > clue_value {
+                        valid = false;
+                        break;
+                    }
+                    if confirmed + non_frontier_hidden < clue_value {
+                        valid = false;
+                        break;
+                    }
+                }
+
+                if valid {
+                    let float_mines = mines_remaining.saturating_sub(mines_in_frontier);
+                    if float_mines <= floating_cells {
+                        let ways = binom(&binom_table, floating_cells, float_mines);
+                        total_weight += ways;
+                        for (i, &is_mine) in config.iter().enumerate() {
+                            if is_mine {
+                                numerators[i] += ways;
+                            }
+                        }
+                    }
+                }
+
+                mask = mask.wrapping_add(1);
+                if mask == 0 {
+                    break;
+                }
+            }
+        }
+
+        if total_weight == 0.0 {
+            return probabilities;
+        }
+
+        // Fill probabilities for frontier
+        for (pos, &cell_idx) in frontier_cells.iter().enumerate() {
+            probabilities.insert(cell_idx, (numerators[pos] / total_weight) as f32);
+        }
+
+        // Floating cell probabilities (uniform among floating cells)
+        let floating_indices: Vec<usize> = self
+            .cells
+            .iter()
+            .enumerate()
+            .filter(|(_, cell)| matches!(cell.state, CellState::Hidden))
+            .filter(|(cell_idx, _)| {
+                self.get_neighbors_indices(*cell_idx)
+                    .iter()
+                    .all(|neighbor_idx| {
+                        matches!(self.cells[*neighbor_idx].state, CellState::Hidden)
+                    })
+            })
+            .map(|(idx, _)| idx)
+            .collect();
+
+        // Compute expected floating mines and assign uniform probability among floating cells
+        let expected_frontier_mines: f64 = numerators.iter().sum::<f64>() / total_weight;
+        let expected_floating_mines = (mines_remaining as f64) - expected_frontier_mines;
+
+        if floating_cells > 0 {
+            let p = (expected_floating_mines / (floating_cells as f64)) as f32;
+            for &float_idx in &floating_indices {
+                probabilities.insert(float_idx, p);
+            }
         }
 
         probabilities
@@ -312,6 +455,13 @@ impl Board {
 
         let mut current_config = vec![false; segment.len()];
 
+        // Mark flagged cells in the segment as forced mines so enumeration
+        // treats them as fixed true and does not explore the false branch.
+        let forced_flags: Vec<bool> = segment
+            .iter()
+            .map(|&idx| matches!(self.cells[idx].state, CellState::Flagged))
+            .collect();
+
         fn rec_get_orientations(
             board: &Board,
             config_idx: usize,
@@ -319,6 +469,7 @@ impl Board {
             segment: &Vec<usize>,
             clues: &Vec<(usize, i32)>,
             result: &mut SegmentResult,
+            forced: &Vec<bool>,
         ) {
             for &(clue_idx, clue_value) in clues {
                 let neighbors = board.get_neighbors_indices(clue_idx);
@@ -359,11 +510,40 @@ impl Board {
                 }
                 return;
             }
-            config[config_idx] = false;
-            rec_get_orientations(board, config_idx + 1, config, segment, clues, result);
+            if forced[config_idx] {
+                config[config_idx] = true;
+                rec_get_orientations(
+                    board,
+                    config_idx + 1,
+                    config,
+                    segment,
+                    clues,
+                    result,
+                    forced,
+                );
+            } else {
+                config[config_idx] = false;
+                rec_get_orientations(
+                    board,
+                    config_idx + 1,
+                    config,
+                    segment,
+                    clues,
+                    result,
+                    forced,
+                );
 
-            config[config_idx] = true;
-            rec_get_orientations(board, config_idx + 1, config, segment, clues, result);
+                config[config_idx] = true;
+                rec_get_orientations(
+                    board,
+                    config_idx + 1,
+                    config,
+                    segment,
+                    clues,
+                    result,
+                    forced,
+                );
+            }
         }
 
         rec_get_orientations(
@@ -373,6 +553,7 @@ impl Board {
             segment,
             &relevant_clues,
             &mut result,
+            &forced_flags,
         );
         result
     }
@@ -462,33 +643,6 @@ impl Board {
             .count();
         self.mines.saturating_sub(flagged)
     }
-
-    #[cfg(test)]
-    pub(crate) fn from_fields(width: usize, height: usize, mines: usize, cells: Vec<Cell>) -> Self {
-        Self {
-            width,
-            height,
-            mines,
-            cells,
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn set_state(&mut self, idx: usize, state: CellState) {
-        self.cells[idx].state = state;
-    }
-
-    #[cfg(test)]
-    pub(crate) fn set_content(&mut self, idx: usize, content: CellContent) {
-        self.cells[idx].content = content;
-    }
-
-    #[cfg(test)]
-    pub(crate) fn place_number_on_cell(&mut self, idx: usize) {
-        if let CellContent::Number(ref mut num) = self.cells[idx].content {
-            *num += 1;
-        }
-    }
 }
 
 #[cfg(test)]
@@ -497,14 +651,9 @@ mod tests {
     use std::collections::HashMap;
 
     fn build_board_with_mines(width: usize, height: usize, mine_indices: &[usize]) -> Board {
-        let mut board = Board::new(width, height, 0);
+        let mut board = Board::new(width, height, mine_indices.len());
         for &idx in mine_indices {
-            board.set_content(idx, CellContent::Mine);
-        }
-        for &idx in mine_indices {
-            for neighbor_idx in board.get_neighbors_indices(idx) {
-                board.place_number_on_cell(neighbor_idx);
-            }
+            board.place_mine(idx);
         }
         board
     }
@@ -536,15 +685,10 @@ mod tests {
 
     #[test]
     fn test_get_frontier_multiple_segments() {
-        let mut board = Board::new(10, 10, 0);
+        let mut board = Board::new(10, 10, 9);
         let mine_placements = [2, 3, 7, 20, 22, 27, 29, 30, 33];
         for mine_idx in mine_placements {
-            board.set_content(mine_idx, CellContent::Mine);
-        }
-        for mine_idx in mine_placements {
-            for neighbor_idx in board.get_neighbors_indices(mine_idx) {
-                board.place_number_on_cell(neighbor_idx);
-            }
+            board.place_mine(mine_idx);
         }
         board.click_cell(0);
         let mut frontier_cells = board.get_frontier_cell_indices();
@@ -624,15 +768,10 @@ mod tests {
 
     #[test]
     fn test_get_possible_orientations_mult() {
-        let mut board = Board::new(10, 10, 0);
+        let mut board = Board::new(10, 10, 10);
         let mine_placements = [2, 3, 7, 15, 20, 22, 27, 29, 30, 33];
         for mine_idx in mine_placements {
-            board.set_content(mine_idx, CellContent::Mine);
-        }
-        for mine_idx in mine_placements {
-            for neighbor_idx in board.get_neighbors_indices(mine_idx) {
-                board.place_number_on_cell(neighbor_idx);
-            }
+            board.place_mine(mine_idx);
         }
 
         board.click_cell(99);
@@ -655,19 +794,52 @@ mod tests {
     }
 
     #[test]
+
+    // This tests compares against a public minesweeper probability calculation document that has a known correct answer.
+    // This can be found at https://docs.google.com/document/d/10YxF7QWxqVcl2Cgxo_mu6Q33uUjKxb9Q0F5gmp3r74c/edit?tab=t.0
+    fn test_probability_calculation_simple() {
+        let mut board = Board::new(16, 16, 40);
+        let mine_placements = [
+            28, 46, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215,
+            216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232,
+            233, 234, 235, 236, 237,
+        ];
+        for mine_idx in mine_placements {
+            board.place_mine(mine_idx);
+        }
+
+        board.click_cell(15);
+        board.click_cell(45);
+
+        let probabilities = board.calculate_probabilities();
+        let probabilities_brute = board.calculate_probabilities_no_split();
+        assert_eq!(probabilities, probabilities_brute);
+    }
+
+    #[test]
     fn test_probability_calculation() {
-        let mut board = Board::new(10, 10, 0);
+        let mut board = Board::new(10, 10, 10);
         let mine_placements = [2, 3, 7, 15, 20, 22, 27, 29, 30, 33];
         for mine_idx in mine_placements {
-            board.set_content(mine_idx, CellContent::Mine);
-        }
-        for mine_idx in mine_placements {
-            for neighbor_idx in board.get_neighbors_indices(mine_idx) {
-                board.place_number_on_cell(neighbor_idx);
-            }
+            board.place_mine(mine_idx);
         }
         board.click_cell(0);
         board.click_cell(99);
-        board.calculate_probabilities();
+        let probabilities = board.calculate_probabilities();
+        let probabilities_brute = board.calculate_probabilities_no_split();
+
+        // Ensure both methods agree (within float tolerance)
+        let mut keys: Vec<usize> = probabilities
+            .keys()
+            .chain(probabilities_brute.keys())
+            .copied()
+            .collect();
+        keys.sort();
+        keys.dedup();
+        for k in keys {
+            let a = *probabilities.get(&k).unwrap_or(&0.0);
+            let b = *probabilities_brute.get(&k).unwrap_or(&0.0);
+            assert!((a - b).abs() < 1e-6, "Mismatch at {}: {} vs {}", k, a, b);
+        }
     }
 }

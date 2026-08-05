@@ -1,8 +1,5 @@
+use crate::ms_board::{Board, CellContent, CellState, gameplay::RevealResult};
 use eframe::egui;
-
-use crate::board::{Board, CellContent, CellState, RevealResult};
-
-type Dimensions = (usize, usize);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GameStatus {
@@ -32,7 +29,7 @@ impl MinesweeperGame {
             status: GameStatus::Created,
         }
     }
-    
+
     // TODO: if GameStatus::Lost isn't handled, clicking mines does nothing
     fn handle_click(&mut self, x: usize, y: usize) {
         // generate mines on first click
@@ -47,15 +44,15 @@ impl MinesweeperGame {
         }
     }
 
-    // pub fn toggle_flag(&mut self, x: usize, y: usize) {
-    //     self.board.toggle_flag(self.board.get_index(x, y));
-    // }
-
     fn check_win(&mut self) {
         if matches!(self.status, GameStatus::Playing) && self.board.is_win_condition_met() {
             self.status = GameStatus::Won;
         }
     }
+
+    // pub fn toggle_flag(&mut self, x: usize, y: usize) {
+    //     self.board.toggle_flag(self.board.get_index(x, y));
+    // }
 
     // pub fn status(&self) -> GameStatus {
     //     self.status
@@ -67,7 +64,6 @@ impl MinesweeperGame {
         self.board = Board::new(x, y, mines);
         self.status = GameStatus::Created;
     }
-
 
     // Returns an iterator of what should be displayed on the board at any given time.
     // Up to the UI for what exactly to display based on what should be displayed.
@@ -96,7 +92,6 @@ impl MinesweeperGame {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
-
         let mut can_play = false;
         match self.status {
             GameStatus::Won => {
@@ -110,7 +105,6 @@ impl MinesweeperGame {
             }
         };
 
-
         ui.vertical_centered(|ui| {
             ui.heading("Minesweeper Game");
             ui.add_space(10.0);
@@ -121,7 +115,6 @@ impl MinesweeperGame {
             egui::Grid::new("minesweeper_grid")
                 .spacing([2.0, 2.0])
                 .show(ui, |ui| {
-
                     let width = self.board.get_width();
                     let height = self.board.get_height();
 
