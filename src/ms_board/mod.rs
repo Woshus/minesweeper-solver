@@ -106,6 +106,12 @@ impl Board {
         self.mines
     }
 
+    pub fn cell_at(&self, x: usize, y: usize) -> (CellContent, CellState) {
+        let idx = self.get_index(x, y);
+        let cell = &self.cells[idx];
+        (cell.content, cell.state)
+    }
+
     pub fn cell_iter(&self) -> impl Iterator<Item = (CellContent, CellState)> {
         self.cells.iter().map(|cell| (cell.content, cell.state))
     }
