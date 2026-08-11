@@ -15,7 +15,26 @@ pub struct MinesweeperSolver {
 }
 
 impl MinesweeperSolver {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    fn install_custom_font(ctx: &egui::Context) {
+        let mut fonts = egui::FontDefinitions::default();
+        fonts.font_data.insert(
+            "krona".to_owned(),
+            egui::FontData::from_static(include_bytes!("../assets/fonts/KronaOne-Regular.ttf"))
+                .into(),
+        );
+
+        fonts
+            .families
+            .entry(egui::FontFamily::Proportional)
+            .or_default()
+            .insert(0, "krona".to_owned());
+
+        ctx.set_fonts(fonts);
+    }
+
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        Self::install_custom_font(&cc.egui_ctx);
+
         Self {
             active_tab: Tab::Game,
             game: MinesweeperGame::new(10, 10, 10),

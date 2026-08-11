@@ -131,6 +131,8 @@ impl MinesweeperGame {
         // Reserve the exact space needed for the full grid so pointer hits map cleanly to cells.
         let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
 
+        // TODO: If we ever want drag-release behavior across different cells, track press origin and release position separately.
+        // For now we intentionally only handle simple click/tap interactions on the cell under the pointer.
         // Convert mouse pointer location into a board cell index for left-click reveal and right-click flagging.
         if let Some(pos) = response.interact_pointer_pos() {
             let local = pos - rect.min;
@@ -160,17 +162,30 @@ impl MinesweeperGame {
         }
     }
 
+    fn get_number_color(num: u8) -> egui::Color32 {
+        match num {
+            1 => egui::Color32::from_rgb(124, 199, 255),
+            2 => egui::Color32::from_rgb(102, 194, 102),
+            3 => egui::Color32::from_rgb(255, 119, 136),
+            4 => egui::Color32::from_rgb(238, 136, 255),
+            5 => egui::Color32::from_rgb(221, 170, 34),
+            6 => egui::Color32::from_rgb(102, 204, 204),
+            7 => egui::Color32::from_rgb(153, 153, 153),
+            8 => egui::Color32::from_rgb(208, 216, 223),
+            _ => egui::Color32::WHITE,
+        }
+    }
+
     fn render_cell(
         &self,
         painter: &egui::Painter,
         cell_rect: egui::Rect,
         cell_display: CellDisplay,
         cell_char: char,
-        ui: &egui::Ui,
+        _ui: &egui::Ui,
     ) {
-
         let bg_color = match cell_display {
-            CellDisplay::Hidden | CellDisplay::Flag => egui::Color32::from_gray(200),
+            CellDisplay::Hidden | CellDisplay::Flag => egui::Color32::from_rgb(76, 84, 92),
             _ => egui::Color32::from_rgb(56, 64, 72),
         };
 
@@ -183,12 +198,21 @@ impl MinesweeperGame {
         );
 
         if !matches!(cell_display, CellDisplay::Hidden) {
+            let text_color = match cell_display {
+                CellDisplay::Number(num) => Self::get_number_color(num),
+                CellDisplay::Mine => egui::Color32::from_rgb(255, 80, 80),
+                CellDisplay::Flag => egui::Color32::from_rgb(255, 120, 0),
+                CellDisplay::Empty => egui::Color32::WHITE,
+                CellDisplay::Hidden => egui::Color32::WHITE,
+            };
+
+            let font_size = (cell_rect.width().min(cell_rect.height()) * 0.64).max(14.0);
             painter.text(
                 cell_rect.center(),
                 egui::Align2::CENTER_CENTER,
                 cell_char.to_string(),
-                egui::TextStyle::Body.resolve(&ui.style()),
-                egui::Color32::BLACK,
+                egui::FontId::new(font_size, egui::FontFamily::Proportional),
+                text_color,
             );
         }
     }
